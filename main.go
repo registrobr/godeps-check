@@ -16,6 +16,11 @@ type dependency struct {
 	Rev        string // VCS-specific commit ID.
 }
 
+type result struct {
+	importPath string
+	commits    []string
+}
+
 var (
 	godepsJSON = flag.String("godeps", os.Getenv("PWD")+"/Godeps/Godeps.json", "path to Godeps.json")
 	godeps     struct {
@@ -75,11 +80,6 @@ func createTemporaryDir() {
 		fmt.Fprintf(os.Stderr, "chmod %s: %s", temporaryDir, err)
 		os.Exit(1)
 	}
-
-	if err := os.Chdir(temporaryDir); err != nil {
-		fmt.Fprintf(os.Stderr, "chdir %s: %s", temporaryDir, err)
-		os.Exit(1)
-	}
 }
 
 func lookGITPath() {
@@ -94,44 +94,57 @@ func lookGITPath() {
 
 func processDependencies(deps []dependency) map[string][]string {
 	results := make(map[string][]string)
+	ch := make(chan result, len(deps))
 
 	for _, d := range deps {
-		importPath := d.ImportPath
-		parts := strings.Split(importPath, "/")
+		go func(d dependency, ch chan result) {
+			ch <- result{d.ImportPath, processDependency(d)}
+		}(d, ch)
+	}
 
-		if len(parts) > 3 {
-			importPath = strings.Join(parts[0:3], "/")
+	done := 0
+
+alldone:
+	for {
+		select {
+		case r := <-ch:
+			results[r.importPath] = r.commits
+			done++
+
+			if done == len(deps) {
+				break alldone
+			}
 		}
-
-		if !strings.Contains(parts[0], ".") {
-			fmt.Fprintf(os.Stderr, "skipping %s: not go gettable\n", d.ImportPath)
-			continue
-		}
-
-		projectDir := path.Join(temporaryDir, importPath)
-
-		if err := os.MkdirAll(projectDir, 0777); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			continue
-		}
-
-		// defer os.RemoveAll(projectDir)
-
-		url := "https://" + importPath
-
-		if err := clone(url, projectDir); err != nil {
-			continue
-		}
-
-		if err := os.Chdir(projectDir); err != nil {
-			fmt.Fprintf(os.Stderr, "chdir %s: %s", temporaryDir, err)
-			continue
-		}
-
-		results[d.ImportPath] = diff(d.Rev)
 	}
 
 	return results
+}
+
+func processDependency(d dependency) []string {
+	importPath := d.ImportPath
+	parts := strings.Split(importPath, "/")
+
+	if len(parts) > 3 {
+		importPath = strings.Join(parts[0:3], "/")
+	}
+
+	if !strings.Contains(parts[0], ".") {
+		fmt.Fprintf(os.Stderr, "skipping %s: not go gettable\n", d.ImportPath)
+		return nil
+	}
+
+	projectDir := path.Join(temporaryDir, importPath)
+
+	if err := os.MkdirAll(projectDir, 0777); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return nil
+	}
+
+	if err := clone("https://"+importPath, projectDir); err != nil {
+		return nil
+	}
+
+	return diff(projectDir, d.Rev)
 }
 
 func clone(url, projectDir string) error {
@@ -139,8 +152,6 @@ func clone(url, projectDir string) error {
 	output, err := cmd.CombinedOutput()
 	content := string(output)
 
-	wd, _ := os.Getwd()
-	fmt.Fprintln(os.Stderr, strings.Replace(wd, temporaryDir+"/", "", -1))
 	fmt.Fprint(os.Stderr, strings.Join(cmd.Args, " "))
 
 	if err != nil {
@@ -154,22 +165,30 @@ func clone(url, projectDir string) error {
 	return err
 }
 
-func diff(revision string) []string {
-	cmd := exec.Command(git, "log", "--pretty=oneline", fmt.Sprintf("%s..master", revision))
+func diff(path, revision string) []string {
+	cmd := exec.Command(git, "-C", path, "log", "--pretty=oneline", revision+"..master")
 	output, err := cmd.CombinedOutput()
+	lines := strings.Split(string(output), "\n")
 
 	if err != nil {
-		return []string{err.Error()}
+		return append(lines, err.Error()+"\n")
 	}
 
-	parts := strings.Split(string(output), "\n")
+	for i := range lines {
+		if len(lines[i]) == 0 {
+			continue
+		}
 
-	if len(parts) > 10 {
-		size := len(parts) - 10
-
-		parts = parts[0:9]
-		parts = append(parts, fmt.Sprintf("[%d commits not shown]\n", size))
+		revision := strings.Split(lines[i], " ")[0]
+		lines[i] = strings.Replace(lines[i], revision, revision[0:7], -1)
 	}
 
-	return parts
+	if len(lines) > 10 {
+		size := len(lines) - 10
+
+		lines = lines[0:9]
+		lines = append(lines, fmt.Sprintf("[%d commits not shown]\n", size))
+	}
+
+	return lines
 }
