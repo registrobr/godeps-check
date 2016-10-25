@@ -166,21 +166,12 @@ func clone(url, projectDir string) error {
 }
 
 func diff(path, revision string) []string {
-	cmd := exec.Command(git, "-C", path, "log", "--pretty=oneline", revision+"..master")
+	cmd := exec.Command(git, "-C", path, "log", "--pretty=%h %s", revision+"..master")
 	output, err := cmd.CombinedOutput()
 	lines := strings.Split(string(output), "\n")
 
 	if err != nil {
 		return append(lines, err.Error()+"\n")
-	}
-
-	for i := range lines {
-		if len(lines[i]) == 0 {
-			continue
-		}
-
-		revision := strings.Split(lines[i], " ")[0]
-		lines[i] = strings.Replace(lines[i], revision, revision[0:7], -1)
 	}
 
 	if len(lines) > 10 {
