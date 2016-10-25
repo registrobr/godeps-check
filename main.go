@@ -176,9 +176,7 @@ func diff(path, revision string) []string {
 
 	if len(lines) > 10 {
 		size := len(lines) - 10
-
-		lines = lines[0:9]
-		lines = append(lines, fmt.Sprintf("[%d commits not shown]\n", size))
+		lines = append(lines[0:9], fmt.Sprintf("[%d commits not shown]\n", size))
 	}
 
 	return lines
