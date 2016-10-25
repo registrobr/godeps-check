@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"io"
 	"io/ioutil"
 	"os"
 	"os/exec"
@@ -18,7 +17,7 @@ type dependency struct {
 }
 
 var (
-	godepsJSON = flag.String("godeps", os.Getenv("PWD")+"/Godeps/Godeps.json", "path go Godeps.json")
+	godepsJSON = flag.String("godeps", os.Getenv("PWD")+"/Godeps/Godeps.json", "path to Godeps.json")
 	godeps     struct {
 		ImportPath string
 		Deps       []dependency
@@ -50,7 +49,17 @@ func main() {
 	}
 
 	lookGITPath()
-	processDependencies(godeps.Deps)
+	results := processDependencies(godeps.Deps)
+
+	for _, dep := range godeps.Deps {
+		if commits := results[dep.ImportPath]; len(commits) > 1 {
+			fmt.Println(dep.ImportPath)
+
+			for _, commit := range commits {
+				fmt.Println("  " + commit)
+			}
+		}
+	}
 }
 
 func createTemporaryDir() {
@@ -83,7 +92,9 @@ func lookGITPath() {
 	}
 }
 
-func processDependencies(deps []dependency) {
+func processDependencies(deps []dependency) map[string][]string {
+	results := make(map[string][]string)
+
 	for _, d := range deps {
 		importPath := d.ImportPath
 		parts := strings.Split(importPath, "/")
@@ -108,7 +119,7 @@ func processDependencies(deps []dependency) {
 
 		url := "https://" + importPath
 
-		if err := run(os.Stderr, nil, git, "clone", url, projectDir); err != nil {
+		if err := clone(url, projectDir); err != nil {
 			continue
 		}
 
@@ -117,43 +128,48 @@ func processDependencies(deps []dependency) {
 			continue
 		}
 
-		run(os.Stdout, cutLog, git, "log", "--pretty=oneline", fmt.Sprintf("%s..master", d.Rev))
+		results[d.ImportPath] = diff(d.Rev)
 	}
+
+	return results
 }
 
-func cutLog(content string) string {
-	parts := strings.Split(content, "\n")
+func clone(url, projectDir string) error {
+	cmd := exec.Command(git, "clone", url, projectDir)
+	output, err := cmd.CombinedOutput()
+	content := string(output)
+
+	wd, _ := os.Getwd()
+	fmt.Fprintln(os.Stderr, strings.Replace(wd, temporaryDir+"/", "", -1))
+	fmt.Fprint(os.Stderr, strings.Join(cmd.Args, " "))
+
+	if err != nil {
+		fmt.Fprintf(os.Stderr, ": %s\n", err)
+	} else {
+		fmt.Fprintln(os.Stderr, "")
+	}
+
+	fmt.Fprintln(os.Stderr, "  "+strings.Replace(content, "\n", "\n  ", -1))
+
+	return err
+}
+
+func diff(revision string) []string {
+	cmd := exec.Command(git, "log", "--pretty=oneline", fmt.Sprintf("%s..master", revision))
+	output, err := cmd.CombinedOutput()
+
+	if err != nil {
+		return []string{err.Error()}
+	}
+
+	parts := strings.Split(string(output), "\n")
 
 	if len(parts) > 10 {
 		size := len(parts) - 10
 
 		parts = parts[0:9]
-		parts = append(parts, fmt.Sprintf("[%d more log entries]\n", size))
+		parts = append(parts, fmt.Sprintf("[%d commits not shown]\n", size))
 	}
 
-	return strings.Join(parts, "\n")
-}
-
-func run(out io.Writer, f func(string) string, executable string, arguments ...string) error {
-	cmd := exec.Command(executable, arguments...)
-	output, err := cmd.CombinedOutput()
-	content := string(output)
-
-	wd, _ := os.Getwd()
-	fmt.Fprintln(out, strings.Replace(wd, temporaryDir+"/", "", -1))
-	fmt.Fprint(out, executable, " ", strings.Join(arguments, " "))
-
-	if err != nil {
-		fmt.Fprintf(out, ": %s\n", err)
-	} else {
-		fmt.Fprintln(out, "")
-	}
-
-	if f != nil {
-		content = f(content)
-	}
-
-	fmt.Fprintln(out, "  "+strings.Replace(content, "\n", "\n  ", -1))
-
-	return err
+	return parts
 }
