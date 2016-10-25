@@ -58,6 +58,8 @@ func main() {
 			for _, commit := range commits {
 				fmt.Println("  " + commit)
 			}
+
+			fmt.Println("")
 		}
 	}
 }
@@ -166,17 +168,17 @@ func clone(url, projectDir string) error {
 }
 
 func diff(path, revision string) []string {
-	cmd := exec.Command(git, "-C", path, "log", "--pretty=%h %s", revision+"..master")
+	cmd := exec.Command(git, "-C", path, "log", "--pretty=format:%cd %h %s", "--date=format:%d/%m/%Y", revision+"..master")
 	output, err := cmd.CombinedOutput()
 	lines := strings.Split(string(output), "\n")
 
 	if err != nil {
-		return append(lines, err.Error()+"\n")
+		return append(lines, err.Error(), "\n")
 	}
 
 	if len(lines) > 10 {
 		size := len(lines) - 10
-		lines = append(lines[0:9], fmt.Sprintf("[%d commits not shown]\n", size))
+		lines = append(lines[0:10], fmt.Sprintf("[%d commits not shown]", size))
 	}
 
 	return lines
