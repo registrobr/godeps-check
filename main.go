@@ -16,11 +16,6 @@ type dependency struct {
 	Rev        string // VCS-specific commit ID.
 }
 
-type result struct {
-	importPath string
-	commits    []string
-}
-
 var (
 	godepsJSON = flag.String("godeps", os.Getenv("PWD")+"/Godeps/Godeps.json", "path to Godeps.json")
 	godeps     struct {
@@ -93,8 +88,13 @@ func lookGITPath() {
 }
 
 func processDependencies(deps []dependency) map[string][]string {
+	type result struct {
+		importPath string
+		commits    []string
+	}
+
 	results := make(map[string][]string)
-	ch := make(chan result, len(deps))
+	ch := make(chan result, 0)
 
 	for _, d := range deps {
 		go func(d dependency, ch chan result) {
