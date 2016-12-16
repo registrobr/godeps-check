@@ -11,28 +11,36 @@ import (
 type dependency struct {
 	ImportPath string
 	Revision   string `json:"rev"`
-	provider   string
+	projectDir string
 	commits    []string
 }
 
-func (d *dependency) processDependency(temporaryDir, git string) {
-	projectDir := path.Join(temporaryDir, d.ImportPath)
-
-	if err := os.MkdirAll(projectDir, 0777); err != nil {
+func (d *dependency) process(git, localProvider string) {
+	if err := os.MkdirAll(d.projectDir, 0777); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return
 	}
 
-	if err := d.clone(projectDir); err != nil {
+	if err := d.clone(git, localProvider); err != nil {
 		return
 	}
 
-	d.commits = d.diff(projectDir)
+	d.diff(git)
 }
 
-func (d *dependency) clone(projectDir string) error {
+func (d *dependency) clone(git, localProvider string) error {
 	url := "https://" + d.ImportPath
-	cmd := exec.Command(git, "clone", url, projectDir)
+
+	if !strings.Contains(strings.Split(d.ImportPath, "/")[0], ".") {
+		if localProvider == "" {
+			fmt.Fprintf(os.Stderr, "skipping %s: not go gettable (no local provider)\n", d.ImportPath)
+			return nil
+		}
+
+		url = localProvider + d.ImportPath
+	}
+
+	cmd := exec.Command(git, "clone", url, d.projectDir)
 	output, err := cmd.CombinedOutput()
 	content := string(output)
 
@@ -49,13 +57,14 @@ func (d *dependency) clone(projectDir string) error {
 	return err
 }
 
-func (d *dependency) diff(path string) []string {
-	cmd := exec.Command(git, "-C", path, "log", "--pretty=format:%cd %h %s", "--date=format:%d/%m/%Y", d.Revision+"..master")
+func (d *dependency) diff(git string) {
+	cmd := exec.Command(git, "-C", d.projectDir, "log", "--pretty=format:%cd %h %s", "--date=format:%d/%m/%Y", d.Revision+"..master")
 	output, err := cmd.CombinedOutput()
 	lines := strings.Split(string(output), "\n")
 
 	if err != nil {
-		return append(lines, err.Error())
+		d.commits = append(lines, err.Error())
+		return
 	}
 
 	if len(lines) > 10 {
@@ -63,15 +72,15 @@ func (d *dependency) diff(path string) []string {
 		lines = append(lines[0:10], fmt.Sprintf("...                more %d commits", size))
 	}
 
-	return lines
+	d.commits = lines
 }
 
-func (d *dependency) Normalize() {
+func (d *dependency) Prepare(temporaryDir string) {
 	parts := strings.Split(d.ImportPath, "/")
 
 	if len(parts) > 3 {
 		d.ImportPath = strings.Join(parts[0:3], "/")
 	}
 
-	d.provider = parts[0]
+	d.projectDir = path.Join(temporaryDir, d.ImportPath)
 }

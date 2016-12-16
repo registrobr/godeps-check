@@ -1,30 +1,19 @@
 package main
 
-import (
-	"fmt"
-	"os"
-	"strings"
-)
-
 type godeps struct {
 	Deps []*dependency
 }
 
-func (g *godeps) processDependencies(temporaryDir, git string) {
+func (g *godeps) process(temporaryDir, git, localProvider string) {
 	ch := make(chan bool, 0)
 	names := make(map[string]bool)
 	size := 0
 	done := 0
 
 	for _, dep := range g.Deps {
-		dep.Normalize()
+		dep.Prepare(temporaryDir)
 
 		if _, ok := names[dep.ImportPath]; ok {
-			continue
-		}
-
-		if !strings.Contains(dep.provider, ".") {
-			fmt.Fprintf(os.Stderr, "skipping %s: not go gettable\n", dep.ImportPath)
 			continue
 		}
 
@@ -32,7 +21,7 @@ func (g *godeps) processDependencies(temporaryDir, git string) {
 		names[dep.ImportPath] = true
 
 		go func(dep *dependency, ch chan bool) {
-			dep.processDependency(temporaryDir, git)
+			dep.process(git, localProvider)
 			ch <- true
 		}(dep, ch)
 	}

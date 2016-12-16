@@ -10,12 +10,13 @@ import (
 )
 
 var (
-	godepsJSON, temporaryDir, git string
+	godepsJSON, temporaryDir, localProvider, git string
 )
 
 func init() {
 	flag.StringVar(&godepsJSON, "godeps", os.Getenv("PWD")+"/Godeps/Godeps.json", "path to Godeps.json")
 	flag.StringVar(&temporaryDir, "temp", "", "temporary path for cloning the repositories")
+	flag.StringVar(&localProvider, "local-provider", "", "path for alternative providers (local git, etc)")
 	flag.Parse()
 }
 
@@ -57,7 +58,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	godeps.process(temporaryDir, git)
+	godeps.process(temporaryDir, git, localProvider)
 
 	for _, dep := range godeps.Deps {
 		if len(dep.commits) > 1 {
